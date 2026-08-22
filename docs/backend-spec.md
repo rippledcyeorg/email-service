@@ -4,7 +4,7 @@
 - Owner: stbensonimoh
 - Repo: `rippledcyeorg/email-service`
 - Date: 2026-08-20, revised 2026-08-22 (issue-driven refinements, recorded as
-  decisions 6-10)
+  decisions 6-11)
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY in this document are to be
 interpreted as described in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
@@ -237,7 +237,7 @@ All secrets live in Cloudflare Worker secrets; `.env.example` documents names on
 | `EMAIL_SECRET` | secret | shared secret for `X-Email-Secret` |
 | `ALLOWED_SENDERS` | config | comma-separated sender addresses callers may use |
 | `DEFAULT_FROM` | config | sender used when `from` is omitted |
-| `TEST_EMAIL` | config | dev-only redirect for every recipient |
+| `TEST_EMAIL` | config | dev-only redirect for every recipient (set to an owned inbox) |
 
 `keep_vars = true` MUST be set as a top-level key in wrangler.toml (before any `[[...]]`
 tables) so dashboard-set vars survive deploys.
@@ -247,6 +247,26 @@ when the secret is missing instead of shipping a Worker that 401s every request.
 development supplies it via `.dev.vars` (git-ignored).
 
 ## 5. Testing strategy
+
+Deliverability-safe testing (decision 11). Hard bounces (nonexistent addresses or
+domains) are added to the Cloudflare suppression list and degrade the `rippledcye.org`
+sending reputation, which hurts real mail. No test MUST send to a fake, reserved, or
+nonexistent address on any path that can reach Email Sending. The owned inboxes
+`benxenon@gmail.com` and `rippledcye@gmail.com` are the v1 test recipients. In
+particular:
+
+- Test payloads MUST use the owned inboxes for `to`. Plus addressing (for example
+  `benxenon+emailsvc1@gmail.com`) provides distinct recipients without new mailboxes.
+  This applies to the integration flow even though `wrangler dev` sends nothing: if a
+  remote binding is ever attached locally, the payloads must already be safe.
+- The live smoke test MUST set `TEST_EMAIL` to an owned inbox and MUST unset it right
+  after the run. The redirect is a safety net, not the address policy.
+- Unit tests never send: the `EMAIL` binding and the queue are fakes, so synthetic
+  addresses in `FakeD1` seed rows are acceptable. Nothing from this suite reaches
+  Email Sending.
+- The `send_email` binding MUST NOT set `remote = true` in wrangler.toml. Local
+  development simulates the binding and writes the message to local files; if remote
+  development is ever required, set `TEST_EMAIL` first.
 
 - Unit tests (vitest): payload validation, secret auth, idempotent replay, rate limits,
   the claim/release cycle (including the orphan bookkeeping), DLQ marking, migration
@@ -268,8 +288,9 @@ development supplies it via `.dev.vars` (git-ignored).
   The script cleans `.wrangler/state` first, then applies `migrations/0001_init.sql` with
   `wrangler d1 execute email-db --local` (unconditional after the clean), and reads the
   secret from `.dev.vars`.
-- Live: one real email per sender, redirected to a test inbox via `TEST_EMAIL`, before the
-  first product goes live.
+- Live: one real email per sender to the owned inboxes (`benxenon@gmail.com`,
+  `rippledcye@gmail.com`), redirected via `TEST_EMAIL`, before the first product goes
+  live.
 
 ## 6. Decisions
 
@@ -305,6 +326,13 @@ development supplies it via `.dev.vars` (git-ignored).
 10. **Pinned Retry-After values.** `60` seconds for the per-minute IP limit and `86400`
     for the daily sender limit. Fixed values keep the integration flow deterministic;
     computed values are a later refinement if callers need them.
+11. **Testing never targets fake addresses.** Hard bounces from fake or nonexistent
+    addresses degrade the sending domain's reputation and fill the suppression list, so
+    every send path in testing uses the owned inboxes (`benxenon@gmail.com`,
+    `rippledcye@gmail.com`) or a `TEST_EMAIL` redirect. Unit tests are exempt because
+    nothing reaches a send path; `wrangler dev` is exempt because the binding simulates
+    locally and no queue consumer runs, but its payloads still use real addresses so a
+    future remote binding cannot bounce fake mail.
 
 ## 7. Out of scope for v1
 
