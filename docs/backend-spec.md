@@ -237,7 +237,7 @@ All secrets live in Cloudflare Worker secrets; `.env.example` documents names on
 | `EMAIL_SECRET` | secret | shared secret for `X-Email-Secret` |
 | `ALLOWED_SENDERS` | config | comma-separated sender addresses callers may use |
 | `DEFAULT_FROM` | config | sender used when `from` is omitted |
-| `TEST_EMAIL` | config | dev-only redirect for every recipient (set to an owned inbox) |
+| `TEST_EMAIL` | config | redirect for every recipient to an owned inbox; empty in production except during the live smoke test (5) |
 
 `keep_vars = true` MUST be set as a top-level key in wrangler.toml (before any `[[...]]`
 tables) so dashboard-set vars survive deploys.
@@ -255,18 +255,25 @@ nonexistent address on any path that can reach Email Sending. The owned inboxes
 `benxenon@gmail.com` and `rippledcye@gmail.com` are the v1 test recipients. In
 particular:
 
-- Test payloads MUST use the owned inboxes for `to`. Plus addressing (for example
-  `benxenon+emailsvc1@gmail.com`) provides distinct recipients without new mailboxes.
-  This applies to the integration flow even though `wrangler dev` sends nothing: if a
-  remote binding is ever attached locally, the payloads must already be safe.
+- Test payloads that pass validation MUST use the owned inboxes for `to`. Plus
+  addressing (for example `benxenon+emailsvc1@gmail.com`) provides distinct recipients
+  without new mailboxes. This applies to the integration flow even though `wrangler dev`
+  sends nothing: if a remote binding is ever attached locally, the payloads MUST already
+  be safe. The integration bad-`to` case (case 4) MUST use shapes that fail validation,
+  such as `not-an-email`, never plausible fake domains like `user@example.com`, which
+  pass the `to` pattern and would be enqueued.
 - The live smoke test MUST set `TEST_EMAIL` to an owned inbox and MUST unset it right
   after the run. The redirect is a safety net, not the address policy.
 - Unit tests never send: the `EMAIL` binding and the queue are fakes, so synthetic
   addresses in `FakeD1` seed rows are acceptable. Nothing from this suite reaches
   Email Sending.
-- The `send_email` binding MUST NOT set `remote = true` in wrangler.toml. Local
-  development simulates the binding and writes the message to local files; if remote
-  development is ever required, set `TEST_EMAIL` first.
+- The committed wrangler.toml MUST NOT set `remote = true` on the `send_email` binding.
+  Local development simulates the binding and writes the message to local files. A
+  remote binding sends real mail through Email Sending, so it is a temporary,
+  uncommitted local override only, and `TEST_EMAIL` MUST be set to an owned inbox before
+  it is ever attached. Cloudflare's docs recommend remote bindings for local dev; this
+  spec bans them because the cost of a mistake is a bounce against the `rippledcye.org`
+  reputation.
 
 - Unit tests (vitest): payload validation, secret auth, idempotent replay, rate limits,
   the claim/release cycle (including the orphan bookkeeping), DLQ marking, migration
@@ -278,13 +285,15 @@ particular:
   2. Same idempotency key again -> 202 with the same id, no second queue message
      (asserted by row count; enqueue happens only on insert).
   3. Missing or wrong secret -> 401.
-  4. Bad payload (bad `to`, unknown `from`, control characters) -> 400 with field errors.
+  4. Bad payload (bad `to` as a validation-failing shape such as `not-an-email`,
+     unknown `from`, control characters) -> 400 with field errors.
   5. 11th request in a minute -> 429 with `Retry-After`, using a dedicated
      `cf-connecting-ip` header value that earlier cases do not share; the dev server sets
      no such header, so the script sets it explicitly.
-  6. Send failure releases the claim so a retry re-sends. `wrangler dev` runs no queue
-     consumers, so this case invokes the consumer function directly with a `FakeD1` and a
-     rejecting `EMAIL` fake instead of the local queue.
+  6. Send failure releases the claim so a retry re-sends. Local queue delivery under
+     `wrangler dev` is limited and not a dependable path for asserting consumer behavior,
+     so this case invokes the consumer function directly with a `FakeD1` and a rejecting
+     `EMAIL` fake instead of the local queue.
   The script cleans `.wrangler/state` first, then applies `migrations/0001_init.sql` with
   `wrangler d1 execute email-db --local` (unconditional after the clean), and reads the
   secret from `.dev.vars`.
@@ -328,11 +337,12 @@ particular:
     computed values are a later refinement if callers need them.
 11. **Testing never targets fake addresses.** Hard bounces from fake or nonexistent
     addresses degrade the sending domain's reputation and fill the suppression list, so
-    every send path in testing uses the owned inboxes (`benxenon@gmail.com`,
-    `rippledcye@gmail.com`) or a `TEST_EMAIL` redirect. Unit tests are exempt because
-    nothing reaches a send path; `wrangler dev` is exempt because the binding simulates
-    locally and no queue consumer runs, but its payloads still use real addresses so a
-    future remote binding cannot bounce fake mail.
+    every payload that can reach a send path uses the owned inboxes (`benxenon@gmail.com`,
+    `rippledcye@gmail.com`). Unit tests are exempt: nothing reaches a send path, so
+    synthetic addresses in seed rows are acceptable. `wrangler dev` sends nothing (the
+    binding simulates locally), but its payloads still MUST use the owned inboxes so a
+    future remote binding cannot bounce fake mail. `TEST_EMAIL` is a redirect safety net
+    for the live smoke test, not an alternative to safe payloads.
 
 ## 7. Out of scope for v1
 
