@@ -77,7 +77,8 @@ sequenceDiagram
         W->>D: load row by id
         W->>D: atomic claim (sent_at conditional UPDATE)
         alt claim lost
-            W->>D: re-read row; orphan rows: complete bookkeeping, no send
+            W->>D: re-read row
+            Note over W: orphan rows get bookkeeping completed, no send
             W-->>W: ack, nothing to do
         else claim won
             W->>E: send
