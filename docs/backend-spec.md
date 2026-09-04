@@ -112,7 +112,8 @@ route, not a Pages Function).
   - `to`: required, `^[^\s@]+@[^\s@]+\.[^\s@]+$`, max 320 chars.
   - `from`: optional; defaults to `DEFAULT_FROM`. When present, MUST be exactly one of the
     `ALLOWED_SENDERS` config entries. Callers can only use sender addresses they were
-    granted.
+    granted. `DEFAULT_FROM` MUST itself be exactly one entry in `ALLOWED_SENDERS`;
+    configuration validation and tests MUST enforce this.
   - `subject`: required, 1..200 chars, no control characters (`[\x00-\x1F\x7F]`).
   - `text`: required, 1..100000 chars, no control characters (`[\x00-\x1F\x7F]`).
   - `html`: optional, max 200000 chars.
