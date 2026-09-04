@@ -113,7 +113,10 @@ route, not a Pages Function).
   - `from`: optional; defaults to `DEFAULT_FROM`. When present, MUST be exactly one of the
     `ALLOWED_SENDERS` config entries. Callers can only use sender addresses they were
     granted. `DEFAULT_FROM` MUST itself be exactly one entry in `ALLOWED_SENDERS`;
-    configuration validation and tests MUST enforce this.
+    configuration validation and tests MUST enforce this. `ALLOWED_SENDERS` parsing:
+    split on commas, trim surrounding ASCII whitespace, reject empty or duplicate
+    entries, and compare normalized lowercase addresses. Apply the same normalization
+    to `DEFAULT_FROM` and request `from`.
   - `subject`: required, 1..200 chars, no control characters (`[\x00-\x1F\x7F]`).
   - `text`: required, 1..100000 chars, no control characters (`[\x00-\x1F\x7F]`).
   - `html`: optional, max 200000 chars.
