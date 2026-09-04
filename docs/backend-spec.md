@@ -182,7 +182,7 @@ CREATE INDEX IF NOT EXISTS idx_rate_limits_created ON rate_limits(created_at);
 
 ### 3.3 Queue: `email-events` + `email-events-dlq`
 
-- Message shape: `{ "type": "email.created", "emailId": "<uuid>", "occurredAt": "2026-09-04T12:34:56.000Z" }`.
+- Message shape: `{ "type": "email.created", "emailId": "<uuid>", "occurredAt": "2026-09-04T12:34:56.000Z" }`. `email.created` has no routing fields; `emailId` is its only payload field. Any additional field MUST be rejected.
 - Retry policy: 5 retries at a fixed 60-second delay, matching the volunteer queue.
 - Exhausted messages MUST land in `email-events-dlq`; the consumer MUST mark the row
   `status = 'failed'` and `processed_at = 'failed'` and ack, never re-run the send.
