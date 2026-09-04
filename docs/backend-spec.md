@@ -3,8 +3,8 @@
 - Status: Draft for review
 - Owner: stbensonimoh
 - Repo: `rippledcyeorg/email-service`
-- Date: 2026-08-20, revised 2026-08-22 (issue-driven refinements, recorded as
-  decisions 6-11)
+- Date: 2026-08-20, revised 2026-08-22 (decisions 6-11) and 2026-09-04
+  (decision 12: at-most-once delivery)
 
 The key words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY in this document are to be
 interpreted as described in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
@@ -22,7 +22,9 @@ The audience: RipplED engineers (the builders of the forms) and the founder (who
 sender addresses and copy).
 
 Success looks like: a caller POSTs once, gets an immediate 202, the email arrives from the
-sender address that caller was granted, and duplicates are impossible.
+sender address that caller was granted, and the same email is never delivered twice.
+Delivery is at-most-once: a rare crash between claim and send can lose a message, and that
+is accepted over ever sending a duplicate (decision 12).
 
 ## 2. Architecture Overview
 
@@ -207,8 +209,12 @@ For each `email.created` message:
    job re-enqueues the row every 15 minutes forever. The tradeoff (a death between claim
    and send marks a row sent without sending) is accepted; see decision 8.
 3. Send via the `EMAIL` binding. If `TEST_EMAIL` is set, redirect the recipient to it.
-4. On send failure: release the claim (`SET sent_at = NULL WHERE id = ? AND sent_at = ?`,
-   pinned to this attempt's timestamp), then throw so the queue retries.
+4. On send failure: if the provider definitely rejected the message, release the claim
+   (`SET sent_at = NULL WHERE id = ? AND sent_at = ?`, pinned to this attempt's timestamp)
+   and throw so the queue retries. If the failure is ambiguous (a timeout or network error
+   where the provider may have accepted the message), do NOT release the claim; leave
+   `sent_at` set so a redelivery treats the row as already sent and completes bookkeeping
+   without resending. This keeps delivery at-most-once (decision 12).
 5. On success: set `status = 'sent'` and `processed_at = 'sent'` and ack.
 
 Reconciliation (scheduled handler, every 15 minutes): re-enqueue `email.created` for rows
@@ -344,6 +350,15 @@ particular:
     binding simulates locally), but its payloads still MUST use the owned inboxes so a
     future remote binding cannot bounce fake mail. `TEST_EMAIL` is a redirect safety net
     for the live smoke test, not an alternative to safe payloads.
+
+12. **At-most-once delivery.** Duplicates are worse than a rare lost email, so the
+    service guarantees at-most-once delivery, not at-least-once. The failure matrix:
+    a crash between claim and send loses the message (accepted); a definite provider
+    rejection releases the claim and retries; an ambiguous failure (a timeout, or the
+    provider may have accepted) leaves the claim set so the row is never resent; and a
+    lost completion write completes bookkeeping without resending (decision 8). This
+    corrects the earlier "duplicates are impossible" wording in the objective, which
+    overpromised.
 
 ## 7. Out of scope for v1
 
