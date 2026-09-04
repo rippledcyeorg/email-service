@@ -112,7 +112,11 @@ route, not a Pages Function).
   - `to`: required, `^[^\s@]+@[^\s@]+\.[^\s@]+$`, max 320 chars.
   - `from`: optional; defaults to `DEFAULT_FROM`. When present, MUST be exactly one of the
     `ALLOWED_SENDERS` config entries. Callers can only use sender addresses they were
-    granted.
+    granted. `DEFAULT_FROM` MUST itself be exactly one entry in `ALLOWED_SENDERS`;
+    configuration validation and tests MUST enforce this. `ALLOWED_SENDERS` parsing:
+    split on commas, trim surrounding ASCII whitespace, reject empty or duplicate
+    entries, and compare normalized lowercase addresses. Apply the same normalization
+    to `DEFAULT_FROM` and request `from`.
   - `subject`: required, 1..200 chars, no control characters (`[\x00-\x1F\x7F]`).
   - `text`: required, 1..100000 chars, no control characters (`[\x00-\x1F\x7F]`).
   - `html`: optional, max 200000 chars.
@@ -126,7 +130,8 @@ route, not a Pages Function).
   contract: the integration flow (5) asserts them.
 - Rate limit MUST be D1-backed: at most 10 requests per minute per IP and 200 requests per
   day per sender address. Over limit returns 429 with `Retry-After` (`60` for the IP
-  limit, `86400` for the sender limit). The limit counts requests, not sends: the check
+  limit, `86400` for the sender limit). If both limits are exceeded, report the IP limit
+  and return `Retry-After: 60`. The limit counts requests, not sends: the check
   runs before the dedupe step, so a replay of an existing key also consumes a slot
   (decision 7).
 - Duplicate handling: a payload whose `idempotency_key` already exists MUST return 202
@@ -181,7 +186,7 @@ CREATE INDEX IF NOT EXISTS idx_rate_limits_created ON rate_limits(created_at);
 
 ### 3.3 Queue: `email-events` + `email-events-dlq`
 
-- Message shape: `{ "type": "email.created", "emailId": "<uuid>", "occurredAt": "<ISO>" }`.
+- Message shape: `{ "type": "email.created", "emailId": "<uuid>", "occurredAt": "2026-09-04T12:34:56.000Z" }`. `email.created` has no routing fields; `emailId` is its only payload field. Any additional field MUST be rejected.
 - Retry policy: 5 retries at a fixed 60-second delay, matching the volunteer queue.
 - Exhausted messages MUST land in `email-events-dlq`; the consumer MUST mark the row
   `status = 'failed'` and `processed_at = 'failed'` and ack, never re-run the send.
@@ -246,8 +251,8 @@ All secrets live in Cloudflare Worker secrets; `.env.example` documents names on
 | `DEFAULT_FROM` | config | sender used when `from` is omitted |
 | `TEST_EMAIL` | config | redirect for every recipient to an owned inbox; empty in production except during the live smoke test (5) |
 
-`keep_vars = true` MUST be set as a top-level key in wrangler.toml (before any `[[...]]`
-tables) so dashboard-set vars survive deploys.
+`keep_vars = true` MUST be set at the top level of wrangler.toml, before any `[table]` or
+`[[array-of-tables]]` declaration, so dashboard-set vars survive deploys.
 
 `secrets.required = ["EMAIL_SECRET"]` SHOULD be set in wrangler.toml so deploys fail loudly
 when the secret is missing instead of shipping a Worker that 401s every request. Local
