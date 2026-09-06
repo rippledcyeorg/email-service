@@ -1,0 +1,30 @@
+name: Board sync
+
+# Thin per-repo caller. Maps the triggering event into the shared
+# board-automation reusable workflow (rippledcye-services), which owns all
+# board status transitions. Kept intentionally small so the logic lives in
+# exactly one place.
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request_target:
+    types: [opened, reopened, closed, review_requested]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    uses: rippledcyeorg/rippledcye-services/.github/workflows/board-automation.yml@main
+    with:
+      event_name: ${{ github.event_name }}
+      action: ${{ github.event.action }}
+      number: ${{ github.event.issue.number || github.event.pull_request.number }}
+      node_id: ${{ github.event.issue.node_id || github.event.pull_request.node_id }}
+      repository: ${{ github.repository }}
+      merged: ${{ github.event.pull_request.merged == true }}
+      review_state: ${{ github.event.review.state || '' }}
+    secrets: inherit
